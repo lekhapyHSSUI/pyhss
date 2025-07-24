@@ -16,6 +16,8 @@ from diameter import Diameter
 from messaging import RedisMessaging
 import database
 import yaml
+import io
+import csv
 
 with open("../config.yaml", 'r') as stream:
     config = (yaml.safe_load(stream))
@@ -371,6 +373,50 @@ class PyHSS_APN(Resource):
             print(E)
             return handle_exception(E)
 
+@ns_apn.route('/upload')
+class UploadAPN(Resource):
+    @ns_apn.doc('Upload CSV to create multiple APNs')
+    def put(self):
+        '''Upload a CSV file and create multiple APNs'''
+        try:
+            if 'file' not in request.files:
+                return {'error': 'No file part in the request'}, 400
+
+            file = request.files['file']
+
+            if file.filename == '':
+                return {'error': 'No selected file'}, 400
+
+            stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
+            csv_reader = csv.DictReader(stream)
+
+            created_apns = []
+            for row in csv_reader:
+                cleaned_row = {k: self._convert_value(v) for k, v in row.items()}
+                print("Creating APN with:", cleaned_row)
+
+                apn_id = databaseClient.CreateObj(APN, cleaned_row, False)
+                created_apns.append(apn_id)
+
+            return {"status": "success", "created_apns": created_apns}, 200
+
+        except Exception as E:
+            print("Exception while uploading APNs:", E)
+            return handle_exception(E)
+
+    def _convert_value(self, value):
+        """Utility to convert CSV strings to appropriate types."""
+        if value.strip().upper() == "TRUE":
+            return True
+        if value.strip().upper() == "FALSE":
+            return False
+        if value.strip() == "":
+            return None
+        try:
+            return int(value)
+        except:
+            return value
+
 @ns_apn.route('/list')
 class PyHSS_OAM_All_APNs(Resource):
     @ns_apn.expect(paginatorParser)
@@ -471,6 +517,50 @@ class PyHSS_AUC(Resource):
         except Exception as E:
             print(E)
             return handle_exception(E)
+
+@ns_auc.route('/upload')
+class UploadAUC(Resource):
+    @ns_auc.doc('Upload CSV to create multiple AUCs')
+    def put(self):
+        '''Upload a CSV file and create multiple AUCs'''
+        try:
+            if 'file' not in request.files:
+                return {'error': 'No file part in the request'}, 400
+
+            file = request.files['file']
+
+            if file.filename == '':
+                return {'error': 'No selected file'}, 400
+
+            stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
+            csv_reader = csv.DictReader(stream)
+
+            created_aucs = []
+            for row in csv_reader:
+                cleaned_row = {k: self._convert_value(v) for k, v in row.items()}
+                print("Creating AUC with:", cleaned_row)
+
+                auc_id = databaseClient.CreateObj(AUC, cleaned_row, False)
+                created_aucs.append(auc_id)
+
+            return {"status": "success", "created_aucs": created_aucs}, 200
+
+        except Exception as E:
+            print(E)
+            return handle_exception(E)
+
+    def _convert_value(self, value):
+        """Utility to convert CSV strings to appropriate types."""
+        if value.strip().upper() == "TRUE":
+            return True
+        if value.strip().upper() == "FALSE":
+            return False
+        if value.strip() == "":
+            return None
+        try:
+            return int(value)
+        except:
+            return value
 
 @ns_auc.route('/list')
 class PyHSS_AUC_All(Resource):
@@ -603,6 +693,55 @@ class PyHSS_SUBSCRIBER(Resource):
         except Exception as E:
             print(E)
             return handle_exception(E)
+
+@ns_subscriber.route('/upload')
+class UploadSUBSCRIBER(Resource):
+    @ns_subscriber.doc('Upload CSV to create multiple SUBSCRIBERs')
+    def put(self):
+        '''Upload a CSV file and create multiple SUBSCRIBERs'''
+        try:
+            if 'file' not in request.files:
+                return {'error': 'No file part in the request'}, 400
+
+            file = request.files['file']
+
+            if file.filename == '':
+                return {'error': 'No selected file'}, 400
+
+            stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
+            csv_reader = csv.DictReader(stream)
+
+            created_subscribers = []
+            for row in csv_reader:
+                cleaned_row = {k: self._convert_value(v) for k, v in row.items()}
+
+                # Clean msisdn field if present
+                if 'msisdn' in cleaned_row and cleaned_row['msisdn']:
+                    cleaned_row['msisdn'] = cleaned_row['msisdn'].replace('+', '')
+
+                print("Creating SUBSCRIBER with:", cleaned_row)
+
+                subscriber_id = databaseClient.CreateObj(SUBSCRIBER, cleaned_row, False)
+                created_subscribers.append(subscriber_id)
+
+            return {"status": "success", "created_subscribers": created_subscribers}, 200
+
+        except Exception as E:
+            print(E)
+            return handle_exception(E)
+
+    def _convert_value(self, value):
+        """Utility to convert CSV strings to appropriate types."""
+        if value.strip().upper() == "TRUE":
+            return True
+        if value.strip().upper() == "FALSE":
+            return False
+        if value.strip() == "":
+            return None
+        try:
+            return int(value)
+        except:
+            return value
 
 @ns_subscriber.route('/imsi/<string:imsi>')
 class PyHSS_SUBSCRIBER_IMSI(Resource):
@@ -765,6 +904,57 @@ class PyHSS_IMS_SUBSCRIBER(Resource):
         except Exception as E:
             print(E)
             return handle_exception(E)
+
+@ns_ims_subscriber.route('/upload')
+class UploadIMS_SUBSCRIBER(Resource):
+    @ns_ims_subscriber.doc('Upload CSV to create multiple IMS SUBSCRIBERs')
+    def put(self):
+        '''Upload a CSV file and create multiple IMS SUBSCRIBERs'''
+        try:
+            if 'file' not in request.files:
+                return {'error': 'No file part in the request'}, 400
+
+            file = request.files['file']
+
+            if file.filename == '':
+                return {'error': 'No selected file'}, 400
+
+            stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
+            csv_reader = csv.DictReader(stream)
+
+            created_ims_subscribers = []
+            for row in csv_reader:
+                cleaned_row = {k: self._convert_value(v) for k, v in row.items()}
+
+                # Clean msisdn fields if present
+                if 'msisdn' in cleaned_row and cleaned_row['msisdn']:
+                    cleaned_row['msisdn'] = cleaned_row['msisdn'].replace('+', '')
+                if 'msisdn_list' in cleaned_row and cleaned_row['msisdn_list']:
+                    cleaned_row['msisdn_list'] = cleaned_row['msisdn_list'].replace('+', '')
+
+                print("Creating IMS_SUBSCRIBER with:", cleaned_row)
+
+                ims_subscriber_id = databaseClient.CreateObj(IMS_SUBSCRIBER, cleaned_row, False)
+                created_ims_subscribers.append(ims_subscriber_id)
+
+            return {"status": "success", "created_ims_subscribers": created_ims_subscribers}, 200
+
+        except Exception as E:
+            print(E)
+            return handle_exception(E)
+
+    def _convert_value(self, value):
+        """Utility to convert CSV strings to appropriate types."""
+        if value.strip().upper() == "TRUE":
+            return True
+        if value.strip().upper() == "FALSE":
+            return False
+        if value.strip() == "":
+            return None
+        try:
+            return int(value)
+        except:
+            return value
 
 @ns_ims_subscriber.route('/ims_subscriber_msisdn/<string:msisdn>')
 class PyHSS_IMS_SUBSCRIBER_MSISDN(Resource):
@@ -1144,6 +1334,50 @@ class PyHSS_EIR(Resource):
         except Exception as E:
             print(E)
             return handle_exception(E)
+
+@ns_eir.route('/upload')
+class UploadEIR(Resource):
+    @ns_eir.doc('Upload CSV to create multiple EIR entries')
+    def put(self):
+        '''Upload a CSV file and create multiple EIR rules'''
+        try:
+            if 'file' not in request.files:
+                return {'error': 'No file part in the request'}, 400
+
+            file = request.files['file']
+
+            if file.filename == '':
+                return {'error': 'No selected file'}, 400
+
+            stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
+            csv_reader = csv.DictReader(stream)
+
+            created_eirs = []
+            for row in csv_reader:
+                cleaned_row = {k: self._convert_value(v) for k, v in row.items()}
+                print("Creating EIR with:", cleaned_row)
+
+                eir_id = databaseClient.CreateObj(EIR, cleaned_row, False)
+                created_eirs.append(eir_id)
+
+            return {"status": "success", "created_eirs": created_eirs}, 200
+
+        except Exception as E:
+            print(E)
+            return handle_exception(E)
+
+    def _convert_value(self, value):
+        """Utility to convert CSV strings to appropriate types."""
+        if value.strip().upper() == "TRUE":
+            return True
+        if value.strip().upper() == "FALSE":
+            return False
+        if value.strip() == "":
+            return None
+        try:
+            return int(value)
+        except:
+            return value
 
 @ns_eir.route('/eir_history/<string:attribute>')
 class PyHSS_EIR_HISTORY(Resource):
