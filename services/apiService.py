@@ -562,6 +562,101 @@ class UploadAUC(Resource):
         except:
             return value
 
+@ns_auc.route('/newsubscriber/upload')
+class UploadNewSubscriber(Resource):
+    @ns_auc.doc('Upload Excel to create new subscribers (AUC, SUBSCRIBER, IMS)')
+    def put(self):
+        '''Upload Excel file to create AUC, SUBSCRIBER, and IMS_SUBSCRIBER entries'''
+        try:
+            if 'file' not in request.files:
+                return {'error': 'No file part in the request'}, 400
+
+            file = request.files['file']
+            if file.filename == '':
+                return {'error': 'No selected file'}, 400
+
+            import pandas as pd
+            import io
+
+            stream = io.BytesIO(file.read())
+            df = pd.read_excel(stream, dtype={"imsi": str, "msisdn": str})
+            df = df.applymap(lambda x: str(x).strip() if isinstance(x, str) else x)
+            df['enabled'] = df['enabled'].apply(lambda x: str(x).lower() in ['true', '1', 'yes'])
+
+            # Get last auc_id
+            try:
+                all_aucs = databaseClient.getAllPaginated(AUC, 0, 10000)
+                last_auc_id = max([auc.get('auc_id', 0) for auc in all_aucs], default=0)
+            except Exception as e:
+                print("Error getting last auc_id:", e)
+                last_auc_id = 0
+
+            created = []
+
+            for _, row in df.iterrows():
+                imsi = row["imsi"].zfill(15)
+                msisdn = row["msisdn"].replace('+', '')
+                last_auc_id += 1
+
+                # === AUC data ===
+                auc_data = {
+                    "imsi": imsi,
+                    "ki": row["ki"],
+                    "opc": row["opc"],
+                    "amf": row["amf"],
+                    "sqn": int(row["sqn"])
+                }
+
+                # === SUBSCRIBER data ===
+                subscriber_data = {
+                    "imsi": imsi,
+                    "enabled": row["enabled"],
+                    "auc_id": last_auc_id,
+                    "default_apn": int(row["default_apn"]),
+                    "apn_list": row["apn_list"],
+                    "msisdn": msisdn,
+                    "ue_ambr_dl": int(row["ue_ambr_dl"]),
+                    "ue_ambr_ul": int(row["ue_ambr_ul"])
+                }
+
+                # === IMS_SUBSCRIBER data ===
+                ims_data = {
+                    "imsi": imsi,
+                    "msisdn": msisdn,
+                    "sh_profile": "string",
+                    "scscf_peer": "scscf.ims.mnc001.mcc001.3gppnetwork.org",
+                    "msisdn_list": f"[{msisdn}]",
+                    "ifc_path": "default_ifc.xml",
+                    "scscf": "sip:scscf.ims.mnc001.mcc001.3gppnetwork.org:6060",
+                    "scscf_realm": "ims.mnc001.mcc001.3gppnetwork.org"
+                }
+
+                try:
+                    # Insert all three objects directly via databaseClient
+                    auc_result = databaseClient.CreateObj(AUC, auc_data, False)
+                    subscriber_result = databaseClient.CreateObj(SUBSCRIBER, subscriber_data, False)
+                    ims_result = databaseClient.CreateObj(IMS_SUBSCRIBER, ims_data, False)
+
+                    created.append({
+                        "imsi": imsi,
+                        "auc_id": last_auc_id,
+                        "status": "success"
+                    })
+
+                except Exception as e:
+                    print(f"❌ Error processing IMSI {imsi}:", e)
+                    created.append({
+                        "imsi": imsi,
+                        "auc_id": last_auc_id,
+                        "status": f"failed: {str(e)}"
+                    })
+
+            return {"status": "completed", "details": created}, 200
+
+        except Exception as E:
+            print(E)
+            return handle_exception(E)
+
 @ns_auc.route('/list')
 class PyHSS_AUC_All(Resource):
     @ns_auc.expect(paginatorParser)
