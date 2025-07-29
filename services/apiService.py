@@ -676,7 +676,6 @@ class UploadNewSubscriber(Resource):
             for _, row in df.iterrows():
                 imsi = row["imsi"].zfill(15)
                 msisdn = row["msisdn"].replace('+', '')
-                last_auc_id += 1
 
                 # === AUC data ===
                 auc_data = {
@@ -687,47 +686,58 @@ class UploadNewSubscriber(Resource):
                     "sqn": int(row["sqn"])
                 }
 
-                # === SUBSCRIBER data ===
-                subscriber_data = {
-                    "imsi": imsi,
-                    "enabled": row["enabled"],
-                    "auc_id": last_auc_id,
-                    "default_apn": int(row["default_apn"]),
-                    "apn_list": row["apn_list"],
-                    "msisdn": msisdn,
-                    "ue_ambr_dl": int(row["ue_ambr_dl"]),
-                    "ue_ambr_ul": int(row["ue_ambr_ul"])
-                }
-
-                # === IMS_SUBSCRIBER data ===
-                ims_data = {
-                    "imsi": imsi,
-                    "msisdn": msisdn,
-                    "sh_profile": "string",
-                    "scscf_peer": "scscf.ims.mnc001.mcc001.3gppnetwork.org",
-                    "msisdn_list": f"[{msisdn}]",
-                    "ifc_path": "default_ifc.xml",
-                    "scscf": "sip:scscf.ims.mnc001.mcc001.3gppnetwork.org:6060",
-                    "scscf_realm": "ims.mnc001.mcc001.3gppnetwork.org"
-                }
-
                 try:
-                    # Insert all three objects directly via databaseClient
+                    # 1. Create AUC and get the actual inserted object
                     auc_result = databaseClient.CreateObj(AUC, auc_data, False)
+
+                    # Adjust this based on what CreateObj returns
+                    # Does it return inserted object, ID, or nothing?
+                    if isinstance(auc_result, dict) and 'auc_id' in auc_result:
+                        inserted_auc_id = auc_result["auc_id"]
+                    else:
+                        # fallback: fetch latest from DB if you must (less reliable in concurrency)
+                        all_aucs = databaseClient.getAllPaginated(AUC, 0, 10000)
+                        inserted_auc_id = max([auc.get('auc_id', 0) for auc in all_aucs], default=0)
+
+                    # === SUBSCRIBER data ===
+                    subscriber_data = {
+                        "imsi": imsi,
+                        "enabled": row["enabled"],
+                        "auc_id": inserted_auc_id,
+                        "default_apn": int(row["default_apn"]),
+                        "apn_list": row["apn_list"],
+                        "msisdn": msisdn,
+                        "ue_ambr_dl": int(row["ue_ambr_dl"]),
+                        "ue_ambr_ul": int(row["ue_ambr_ul"])
+                    }
+
+                    # === IMS_SUBSCRIBER data ===
+                    ims_data = {
+                        "imsi": imsi,
+                        "msisdn": msisdn,
+                        "sh_profile": "string",
+                        "scscf_peer": "scscf.ims.mnc001.mcc001.3gppnetwork.org",
+                        "msisdn_list": f"[{msisdn}]",
+                        "ifc_path": "default_ifc.xml",
+                        "scscf": "sip:scscf.ims.mnc001.mcc001.3gppnetwork.org:6060",
+                        "scscf_realm": "ims.mnc001.mcc001.3gppnetwork.org"
+                    }
+
+                    # 2. Insert subscriber and IMS
                     subscriber_result = databaseClient.CreateObj(SUBSCRIBER, subscriber_data, False)
                     ims_result = databaseClient.CreateObj(IMS_SUBSCRIBER, ims_data, False)
 
                     created.append({
                         "imsi": imsi,
-                        "auc_id": last_auc_id,
+                        "auc_id": inserted_auc_id,
                         "status": "success"
                     })
 
                 except Exception as e:
-                    print(f"❌ Error processing IMSI {imsi}:", e)
+                    print(f"Error processing IMSI {imsi}:", e)
                     created.append({
                         "imsi": imsi,
-                        "auc_id": last_auc_id,
+                        "auc_id": inserted_auc_id if 'inserted_auc_id' in locals() else None,
                         "status": f"failed: {str(e)}"
                     })
 
