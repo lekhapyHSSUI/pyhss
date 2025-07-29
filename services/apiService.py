@@ -18,6 +18,7 @@ import database
 import yaml
 import io
 import csv
+import pandas as pd
 
 with open("../config.yaml", 'r') as stream:
     config = (yaml.safe_load(stream))
@@ -375,9 +376,9 @@ class PyHSS_APN(Resource):
 
 @ns_apn.route('/upload')
 class UploadAPN(Resource):
-    @ns_apn.doc('Upload CSV to create multiple APNs')
+    @ns_apn.doc('Upload CSV to create or update multiple APNs')
     def put(self):
-        '''Upload a CSV file and create multiple APNs'''
+        '''Upload a CSV file and create/update multiple APNs'''
         try:
             if 'file' not in request.files:
                 return {'error': 'No file part in the request'}, 400
@@ -390,27 +391,68 @@ class UploadAPN(Resource):
             stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
             csv_reader = csv.DictReader(stream)
 
-            created_apns = []
+            results = []
             for row in csv_reader:
                 cleaned_row = {k: self._convert_value(v) for k, v in row.items()}
-                print("Creating APN with:", cleaned_row)
+                apn_id = cleaned_row.get("apn_id")
 
-                apn_id = databaseClient.CreateObj(APN, cleaned_row, False)
-                created_apns.append(apn_id)
+                if apn_id is None:
+                    results.append({
+                        "apn_id": None,
+                        "action": "error",
+                        "error": "Missing apn_id in row"
+                    })
+                    continue
 
-            return {"status": "success", "created_apns": created_apns}, 200
+                try:
+                    # Try to get existing APN
+                    existing_apn = databaseClient.GetObj(APN, apn_id)
 
-        except Exception as E:
-            print("Exception while uploading APNs:", E)
-            return handle_exception(E)
+                    # If exists, update
+                    updated_apn = databaseClient.UpdateObj(APN, cleaned_row, apn_id, False)
+                    results.append({
+                        "apn_id": apn_id,
+                        "action": "updated",
+                        "data": updated_apn
+                    })
+                except Exception as e:
+                    # If not found, create new
+                    if "No <class 'database.APN'>" in str(e):
+                        try:
+                            new_apn_id = databaseClient.CreateObj(APN, cleaned_row, False)
+                            results.append({
+                                "apn_id": new_apn_id,
+                                "action": "created"
+                            })
+                        except Exception as inner_e:
+                            results.append({
+                                "apn_id": apn_id,
+                                "action": "error",
+                                "error": str(inner_e)
+                            })
+                    else:
+                        results.append({
+                            "apn_id": apn_id,
+                            "action": "error",
+                            "error": str(e)
+                        })
+
+            return {"status": "success", "results": results}, 200
+
+        except Exception as e:
+            print("Exception while uploading APNs:", e)
+            return handle_exception(e)
 
     def _convert_value(self, value):
         """Utility to convert CSV strings to appropriate types."""
-        if value.strip().upper() == "TRUE":
+        if value is None:
+            return None
+        value = value.strip()
+        if value.upper() == "TRUE":
             return True
-        if value.strip().upper() == "FALSE":
+        if value.upper() == "FALSE":
             return False
-        if value.strip() == "":
+        if value == "":
             return None
         try:
             return int(value)
@@ -520,9 +562,9 @@ class PyHSS_AUC(Resource):
 
 @ns_auc.route('/upload')
 class UploadAUC(Resource):
-    @ns_auc.doc('Upload CSV to create multiple AUCs')
+    @ns_auc.doc('Upload CSV to create or update multiple AUCs')
     def put(self):
-        '''Upload a CSV file and create multiple AUCs'''
+        '''Upload a CSV file and create/update multiple AUCs'''
         try:
             if 'file' not in request.files:
                 return {'error': 'No file part in the request'}, 400
@@ -535,15 +577,53 @@ class UploadAUC(Resource):
             stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
             csv_reader = csv.DictReader(stream)
 
-            created_aucs = []
+            results = []
             for row in csv_reader:
                 cleaned_row = {k: self._convert_value(v) for k, v in row.items()}
-                print("Creating AUC with:", cleaned_row)
+                auc_id = cleaned_row.get("auc_id")
 
-                auc_id = databaseClient.CreateObj(AUC, cleaned_row, False)
-                created_aucs.append(auc_id)
+                if auc_id is None:
+                    results.append({
+                        "auc_id": None,
+                        "action": "error",
+                        "error": "Missing auc_id in row"
+                    })
+                    continue
 
-            return {"status": "success", "created_aucs": created_aucs}, 200
+                try:
+                    # Try to get existing AUC
+                    existing_auc = databaseClient.GetObj(AUC, auc_id)
+
+                    # If exists, update
+                    updated_auc = databaseClient.UpdateObj(AUC, cleaned_row, auc_id, False)
+                    results.append({
+                        "auc_id": auc_id,
+                        "action": "updated",
+                        "data": updated_auc
+                    })
+                except Exception as e:
+                    # If not found, create new
+                    if "No <class 'database.AUC'>" in str(e):
+                        try:
+                            new_auc_id = databaseClient.CreateObj(AUC, cleaned_row, False)
+                            results.append({
+                                "auc_id": new_auc_id,
+                                "action": "created"
+                            })
+                        except Exception as inner_e:
+                            results.append({
+                                "auc_id": auc_id,
+                                "action": "error",
+                                "error": str(inner_e)
+                            })
+                    else:
+                        results.append({
+                            "auc_id": auc_id,
+                            "action": "error",
+                            "error": str(e)
+                        })
+
+            return {"status": "success", "results": results}, 200
 
         except Exception as E:
             print(E)
@@ -551,11 +631,14 @@ class UploadAUC(Resource):
 
     def _convert_value(self, value):
         """Utility to convert CSV strings to appropriate types."""
-        if value.strip().upper() == "TRUE":
+        if value is None:
+            return None
+        value = value.strip()
+        if value.upper() == "TRUE":
             return True
-        if value.strip().upper() == "FALSE":
+        if value.upper() == "FALSE":
             return False
-        if value.strip() == "":
+        if value == "":
             return None
         try:
             return int(value)
@@ -574,9 +657,6 @@ class UploadNewSubscriber(Resource):
             file = request.files['file']
             if file.filename == '':
                 return {'error': 'No selected file'}, 400
-
-            import pandas as pd
-            import io
 
             stream = io.BytesIO(file.read())
             df = pd.read_excel(stream, dtype={"imsi": str, "msisdn": str})
@@ -791,9 +871,9 @@ class PyHSS_SUBSCRIBER(Resource):
 
 @ns_subscriber.route('/upload')
 class UploadSUBSCRIBER(Resource):
-    @ns_subscriber.doc('Upload CSV to create multiple SUBSCRIBERs')
+    @ns_subscriber.doc('Upload CSV to create/update multiple SUBSCRIBERs')
     def put(self):
-        '''Upload a CSV file and create multiple SUBSCRIBERs'''
+        '''Upload a CSV file and create/update multiple SUBSCRIBERs'''
         try:
             if 'file' not in request.files:
                 return {'error': 'No file part in the request'}, 400
@@ -806,20 +886,57 @@ class UploadSUBSCRIBER(Resource):
             stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
             csv_reader = csv.DictReader(stream)
 
-            created_subscribers = []
+            results = []
             for row in csv_reader:
                 cleaned_row = {k: self._convert_value(v) for k, v in row.items()}
 
-                # Clean msisdn field if present
+                # Clean msisdn
                 if 'msisdn' in cleaned_row and cleaned_row['msisdn']:
                     cleaned_row['msisdn'] = cleaned_row['msisdn'].replace('+', '')
 
-                print("Creating SUBSCRIBER with:", cleaned_row)
+                subscriber_id = cleaned_row.get("subscriber_id")
 
-                subscriber_id = databaseClient.CreateObj(SUBSCRIBER, cleaned_row, False)
-                created_subscribers.append(subscriber_id)
+                if subscriber_id is None:
+                    results.append({
+                        "subscriber_id": None,
+                        "action": "error",
+                        "error": "Missing subscriber_id"
+                    })
+                    continue
 
-            return {"status": "success", "created_subscribers": created_subscribers}, 200
+                try:
+                    # Try to get existing SUBSCRIBER
+                    existing = databaseClient.GetObj(SUBSCRIBER, subscriber_id)
+
+                    # Update if found
+                    updated_subscriber = databaseClient.UpdateObj(SUBSCRIBER, cleaned_row, subscriber_id, False)
+                    results.append({
+                        "subscriber_id": subscriber_id,
+                        "action": "updated",
+                        "data": updated_subscriber
+                    })
+                except Exception as e:
+                    if "No <class 'database.SUBSCRIBER'>" in str(e):
+                        try:
+                            new_id = databaseClient.CreateObj(SUBSCRIBER, cleaned_row, False)
+                            results.append({
+                                "subscriber_id": new_id,
+                                "action": "created"
+                            })
+                        except Exception as inner_e:
+                            results.append({
+                                "subscriber_id": subscriber_id,
+                                "action": "error",
+                                "error": str(inner_e)
+                            })
+                    else:
+                        results.append({
+                            "subscriber_id": subscriber_id,
+                            "action": "error",
+                            "error": str(e)
+                        })
+
+            return {"status": "success", "results": results}, 200
 
         except Exception as E:
             print(E)
@@ -827,11 +944,14 @@ class UploadSUBSCRIBER(Resource):
 
     def _convert_value(self, value):
         """Utility to convert CSV strings to appropriate types."""
-        if value.strip().upper() == "TRUE":
+        if value is None:
+            return None
+        value = value.strip()
+        if value.upper() == "TRUE":
             return True
-        if value.strip().upper() == "FALSE":
+        if value.upper() == "FALSE":
             return False
-        if value.strip() == "":
+        if value == "":
             return None
         try:
             return int(value)
@@ -1002,9 +1122,9 @@ class PyHSS_IMS_SUBSCRIBER(Resource):
 
 @ns_ims_subscriber.route('/upload')
 class UploadIMS_SUBSCRIBER(Resource):
-    @ns_ims_subscriber.doc('Upload CSV to create multiple IMS SUBSCRIBERs')
+    @ns_ims_subscriber.doc('Upload CSV to create/update multiple IMS SUBSCRIBERs')
     def put(self):
-        '''Upload a CSV file and create multiple IMS SUBSCRIBERs'''
+        '''Upload a CSV file and create/update multiple IMS SUBSCRIBERs'''
         try:
             if 'file' not in request.files:
                 return {'error': 'No file part in the request'}, 400
@@ -1017,7 +1137,7 @@ class UploadIMS_SUBSCRIBER(Resource):
             stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
             csv_reader = csv.DictReader(stream)
 
-            created_ims_subscribers = []
+            results = []
             for row in csv_reader:
                 cleaned_row = {k: self._convert_value(v) for k, v in row.items()}
 
@@ -1027,12 +1147,50 @@ class UploadIMS_SUBSCRIBER(Resource):
                 if 'msisdn_list' in cleaned_row and cleaned_row['msisdn_list']:
                     cleaned_row['msisdn_list'] = cleaned_row['msisdn_list'].replace('+', '')
 
-                print("Creating IMS_SUBSCRIBER with:", cleaned_row)
+                ims_subscriber_id = cleaned_row.get("ims_subscriber_id")
 
-                ims_subscriber_id = databaseClient.CreateObj(IMS_SUBSCRIBER, cleaned_row, False)
-                created_ims_subscribers.append(ims_subscriber_id)
+                if ims_subscriber_id is None:
+                    results.append({
+                        "ims_subscriber_id": None,
+                        "action": "error",
+                        "error": "Missing ims_subscriber_id"
+                    })
+                    continue
 
-            return {"status": "success", "created_ims_subscribers": created_ims_subscribers}, 200
+                try:
+                    # Try to get existing object
+                    existing = databaseClient.GetObj(IMS_SUBSCRIBER, ims_subscriber_id)
+
+                    # Update if exists
+                    updated_obj = databaseClient.UpdateObj(IMS_SUBSCRIBER, cleaned_row, ims_subscriber_id, False)
+                    results.append({
+                        "ims_subscriber_id": ims_subscriber_id,
+                        "action": "updated",
+                        "data": updated_obj
+                    })
+
+                except Exception as e:
+                    if "No <class 'database.IMS_SUBSCRIBER'>" in str(e):
+                        try:
+                            new_id = databaseClient.CreateObj(IMS_SUBSCRIBER, cleaned_row, False)
+                            results.append({
+                                "ims_subscriber_id": new_id,
+                                "action": "created"
+                            })
+                        except Exception as inner_e:
+                            results.append({
+                                "ims_subscriber_id": ims_subscriber_id,
+                                "action": "error",
+                                "error": str(inner_e)
+                            })
+                    else:
+                        results.append({
+                            "ims_subscriber_id": ims_subscriber_id,
+                            "action": "error",
+                            "error": str(e)
+                        })
+
+            return {"status": "success", "results": results}, 200
 
         except Exception as E:
             print(E)
@@ -1040,11 +1198,14 @@ class UploadIMS_SUBSCRIBER(Resource):
 
     def _convert_value(self, value):
         """Utility to convert CSV strings to appropriate types."""
-        if value.strip().upper() == "TRUE":
+        if value is None:
+            return None
+        value = value.strip()
+        if value.upper() == "TRUE":
             return True
-        if value.strip().upper() == "FALSE":
+        if value.upper() == "FALSE":
             return False
-        if value.strip() == "":
+        if value == "":
             return None
         try:
             return int(value)
@@ -1432,9 +1593,9 @@ class PyHSS_EIR(Resource):
 
 @ns_eir.route('/upload')
 class UploadEIR(Resource):
-    @ns_eir.doc('Upload CSV to create multiple EIR entries')
+    @ns_eir.doc('Upload CSV to create/update multiple EIR entries')
     def put(self):
-        '''Upload a CSV file and create multiple EIR rules'''
+        '''Upload a CSV file and create/update multiple EIR rules'''
         try:
             if 'file' not in request.files:
                 return {'error': 'No file part in the request'}, 400
@@ -1447,15 +1608,53 @@ class UploadEIR(Resource):
             stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
             csv_reader = csv.DictReader(stream)
 
-            created_eirs = []
+            results = []
             for row in csv_reader:
                 cleaned_row = {k: self._convert_value(v) for k, v in row.items()}
-                print("Creating EIR with:", cleaned_row)
+                eir_id = cleaned_row.get("eir_id")
 
-                eir_id = databaseClient.CreateObj(EIR, cleaned_row, False)
-                created_eirs.append(eir_id)
+                if eir_id is None:
+                    results.append({
+                        "eir_id": None,
+                        "action": "error",
+                        "error": "Missing eir_id"
+                    })
+                    continue
 
-            return {"status": "success", "created_eirs": created_eirs}, 200
+                try:
+                    # Try to fetch existing EIR entry
+                    existing = databaseClient.GetObj(EIR, eir_id)
+
+                    # If exists, update
+                    updated_obj = databaseClient.UpdateObj(EIR, cleaned_row, eir_id, False)
+                    results.append({
+                        "eir_id": eir_id,
+                        "action": "updated",
+                        "data": updated_obj
+                    })
+
+                except Exception as e:
+                    if "No <class 'database.EIR'>" in str(e):
+                        try:
+                            new_id = databaseClient.CreateObj(EIR, cleaned_row, False)
+                            results.append({
+                                "eir_id": new_id,
+                                "action": "created"
+                            })
+                        except Exception as inner_e:
+                            results.append({
+                                "eir_id": eir_id,
+                                "action": "error",
+                                "error": str(inner_e)
+                            })
+                    else:
+                        results.append({
+                            "eir_id": eir_id,
+                            "action": "error",
+                            "error": str(e)
+                        })
+
+            return {"status": "success", "results": results}, 200
 
         except Exception as E:
             print(E)
@@ -1463,11 +1662,14 @@ class UploadEIR(Resource):
 
     def _convert_value(self, value):
         """Utility to convert CSV strings to appropriate types."""
-        if value.strip().upper() == "TRUE":
+        if value is None:
+            return None
+        value = value.strip()
+        if value.upper() == "TRUE":
             return True
-        if value.strip().upper() == "FALSE":
+        if value.upper() == "FALSE":
             return False
-        if value.strip() == "":
+        if value == "":
             return None
         try:
             return int(value)
