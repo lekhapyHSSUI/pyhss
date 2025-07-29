@@ -23,8 +23,6 @@ import pandas as pd
 with open("../config.yaml", 'r') as stream:
     config = (yaml.safe_load(stream))
 
-ns_auc = api.namespace('subscriber', description='Subscriber Operations')
-
 BASE_URL = "http://localhost:8080"  
 HEADERS = {"Content-Type": "application/json"}
 
