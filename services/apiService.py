@@ -747,6 +747,75 @@ class UploadNewSubscriber(Resource):
             print(E)
             return handle_exception(E)
 
+@ns_auc.route('/subscriber/delete')
+class DeleteSubscribers(Resource):
+    @ns_auc.doc('Delete subscribers, IMS subscribers, and AUC records from Excel IMSI list')
+    def put(self):
+        if 'file' not in request.files:
+            return {'error': 'No file part in request'}, 400
+
+        file = request.files['file']
+        if file.filename == '':
+            return {'error': 'No file selected'}, 400
+
+        try:
+            df = pd.read_excel(file, dtype={"imsi": str})
+            df['imsi'] = df['imsi'].apply(lambda x: x.strip().zfill(15))
+
+            response_log = []
+
+            for imsi in df['imsi']:
+                log = {"imsi": imsi, "deleted": [], "errors": []}
+
+                # --- Step 1: IMS_SUBSCRIBER ---
+                try:
+                    r1 = requests.get(f"{BASE_URL}/ims_subscriber/ims_subscriber_imsi/{imsi}", headers=HEADERS)
+                    if r1.status_code == 200:
+                        ims_id = r1.json().get("ims_subscriber_id")
+                        d1 = requests.delete(f"{BASE_URL}/ims_subscriber/{ims_id}", headers=HEADERS)
+                        log["deleted"].append(f"IMS_SUBSCRIBER {ims_id}")
+                    elif r1.status_code == 404:
+                        log["errors"].append("IMS_SUBSCRIBER not found")
+                    else:
+                        log["errors"].append(f"IMS_SUBSCRIBER fetch failed: {r1.status_code}")
+                except Exception as e:
+                    log["errors"].append(f"IMS_SUBSCRIBER delete error: {str(e)}")
+
+                # --- Step 2: SUBSCRIBER ---
+                try:
+                    r2 = requests.get(f"{BASE_URL}/subscriber/imsi/{imsi}", headers=HEADERS)
+                    if r2.status_code == 200:
+                        sub_id = r2.json().get("subscriber_id")
+                        d2 = requests.delete(f"{BASE_URL}/subscriber/{sub_id}", headers=HEADERS)
+                        log["deleted"].append(f"SUBSCRIBER {sub_id}")
+                    elif r2.status_code == 404:
+                        log["errors"].append("SUBSCRIBER not found")
+                    else:
+                        log["errors"].append(f"SUBSCRIBER fetch failed: {r2.status_code}")
+                except Exception as e:
+                    log["errors"].append(f"SUBSCRIBER delete error: {str(e)}")
+
+                # --- Step 3: AUC ---
+                try:
+                    r3 = requests.get(f"{BASE_URL}/auc/imsi/{imsi}", headers=HEADERS)
+                    if r3.status_code == 200:
+                        auc_id = r3.json().get("auc_id")
+                        d3 = requests.delete(f"{BASE_URL}/auc/{auc_id}", headers=HEADERS)
+                        log["deleted"].append(f"AUC {auc_id}")
+                    elif r3.status_code == 404:
+                        log["errors"].append("AUC not found")
+                    else:
+                        log["errors"].append(f"AUC fetch failed: {r3.status_code}")
+                except Exception as e:
+                    log["errors"].append(f"AUC delete error: {str(e)}")
+
+                response_log.append(log)
+
+            return {"result": "completed", "details": response_log}, 200
+
+        except Exception as e:
+            return {"error": str(e)}, 500
+
 @ns_auc.route('/list')
 class PyHSS_AUC_All(Resource):
     @ns_auc.expect(paginatorParser)
