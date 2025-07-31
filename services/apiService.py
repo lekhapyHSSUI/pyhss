@@ -19,16 +19,12 @@ import yaml
 import io
 import csv
 import pandas as pd
-from datetime import datetime
 
-# with open("../config.yaml", 'r') as stream:
-#     config = (yaml.safe_load(stream))
+with open("../config.yaml", 'r') as stream:
+    config = (yaml.safe_load(stream))
 
 BASE_URL = "http://localhost:8080"  
 HEADERS = {"Content-Type": "application/json"}
-
-UPLOAD_META_DIR = 'uploaded_metadata'
-os.makedirs(UPLOAD_META_DIR, exist_ok=True)
 
 siteName = config.get("hss", {}).get("site_name", "")
 originHostname = socket.gethostname()
@@ -665,32 +661,12 @@ class UploadNewSubscriber(Resource):
             if file.filename == '':
                 return {'error': 'No selected file'}, 400
 
-            # Save original file name and read content
-            original_filename = file.filename
-            timestamp_str = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-            file_bytes = file.read()
-            stream = io.BytesIO(file_bytes)
-
-            # Load Excel into DataFrame
+            stream = io.BytesIO(file.read())
             df = pd.read_excel(stream, dtype={"imsi": str, "msisdn": str})
             df = df.applymap(lambda x: str(x).strip() if isinstance(x, str) else x)
             df['enabled'] = df['enabled'].apply(lambda x: str(x).lower() in ['true', '1', 'yes'])
 
-            # Convert DataFrame to CSV string
-            csv_content_str = df.to_csv(index=False)
-
-            # Save metadata JSON file with same base name as Excel
-            meta_filename = f"{os.path.splitext(original_filename)[0]}.json"
-            metadata = {
-                "filename": original_filename,
-                "uploaded_at": timestamp_str,
-                "content": csv_content_str
-            }
-            meta_path = os.path.join(UPLOAD_META_DIR, meta_filename)
-            with open(meta_path, 'w') as f:
-                json.dump(metadata, f, indent=4)
-
-            # Get last AUC ID
+            # Get last auc_id
             try:
                 all_aucs = databaseClient.getAllPaginated(AUC, 0, 10000)
                 last_auc_id = max([auc.get('auc_id', 0) for auc in all_aucs], default=0)
@@ -701,23 +677,28 @@ class UploadNewSubscriber(Resource):
             created = []
 
             for _, row in df.iterrows():
+                imsi = row["imsi"].zfill(15)
+                msisdn = row["msisdn"].replace('+', '')
+
+                # === AUC data ===
+                auc_data = {
+                    "imsi": imsi,
+                    "ki": row["ki"],
+                    "opc": row["opc"],
+                    "amf": row["amf"],
+                    "sqn": int(row["sqn"])
+                }
+
                 try:
-                    imsi = row["imsi"].zfill(15)
-                    msisdn = row["msisdn"].replace('+', '')
-
-                    # === AUC data ===
-                    auc_data = {
-                        "imsi": imsi,
-                        "ki": row["ki"],
-                        "opc": row["opc"],
-                        "amf": row["amf"],
-                        "sqn": int(row["sqn"])
-                    }
-
+                    # 1. Create AUC and get the actual inserted object
                     auc_result = databaseClient.CreateObj(AUC, auc_data, False)
+
+                    # Adjust this based on what CreateObj returns
+                    # Does it return inserted object, ID, or nothing?
                     if isinstance(auc_result, dict) and 'auc_id' in auc_result:
                         inserted_auc_id = auc_result["auc_id"]
                     else:
+                        # fallback: fetch latest from DB if you must (less reliable in concurrency)
                         all_aucs = databaseClient.getAllPaginated(AUC, 0, 10000)
                         inserted_auc_id = max([auc.get('auc_id', 0) for auc in all_aucs], default=0)
 
@@ -745,8 +726,9 @@ class UploadNewSubscriber(Resource):
                         "scscf_realm": "ims.mnc001.mcc001.3gppnetwork.org"
                     }
 
-                    databaseClient.CreateObj(SUBSCRIBER, subscriber_data, False)
-                    databaseClient.CreateObj(IMS_SUBSCRIBER, ims_data, False)
+                    # 2. Insert subscriber and IMS
+                    subscriber_result = databaseClient.CreateObj(SUBSCRIBER, subscriber_data, False)
+                    ims_result = databaseClient.CreateObj(IMS_SUBSCRIBER, ims_data, False)
 
                     created.append({
                         "imsi": imsi,
@@ -755,23 +737,14 @@ class UploadNewSubscriber(Resource):
                     })
 
                 except Exception as e:
-                    print(f"Error processing IMSI {row.get('imsi')}: {e}")
+                    print(f"Error processing IMSI {imsi}:", e)
                     created.append({
-                        "imsi": row.get("imsi"),
+                        "imsi": imsi,
+                        "auc_id": inserted_auc_id if 'inserted_auc_id' in locals() else None,
                         "status": f"failed: {str(e)}"
                     })
 
-            # Final response
-            return {
-                "status": "completed",
-                "details": created,
-                "file_info": {
-                    "filename": original_filename,
-                    "uploaded_at": timestamp_str,
-                    "json_file": meta_filename,
-                    "content": csv_content_str
-                }
-            }, 200
+            return {"status": "completed", "details": created}, 200
 
         except Exception as E:
             print(E)
