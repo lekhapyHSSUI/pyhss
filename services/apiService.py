@@ -21,8 +21,8 @@ import csv
 import pandas as pd
 from datetime import datetime
 
-with open("../config.yaml", 'r') as stream:
-    config = (yaml.safe_load(stream))
+# with open("../config.yaml", 'r') as stream:
+#     config = (yaml.safe_load(stream))
 
 BASE_URL = "http://localhost:8080"  
 HEADERS = {"Content-Type": "application/json"}
