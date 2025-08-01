@@ -19,6 +19,7 @@ import yaml
 import io
 import csv
 import pandas as pd
+from datetime import datetime
 
 with open("../config.yaml", 'r') as stream:
     config = (yaml.safe_load(stream))
@@ -661,12 +662,34 @@ class UploadNewSubscriber(Resource):
             if file.filename == '':
                 return {'error': 'No selected file'}, 400
 
+            # === Read file and convert to DataFrame ===
             stream = io.BytesIO(file.read())
             df = pd.read_excel(stream, dtype={"imsi": str, "msisdn": str})
             df = df.applymap(lambda x: str(x).strip() if isinstance(x, str) else x)
             df['enabled'] = df['enabled'].apply(lambda x: str(x).lower() in ['true', '1', 'yes'])
 
-            # Get last auc_id
+            # === Capture file metadata ===
+            file_name = file.filename
+            upload_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            file_content_string = df.to_csv(index=False)
+
+            file_info = {
+                "file_name": file_name,
+                "upload_time": upload_time,
+                "file_content": file_content_string
+            }
+
+            # === Save file_info to a .json file with timestamp ===
+            os.makedirs("upload_logs", exist_ok=True)
+            base_filename = os.path.splitext(file_name)[0]
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            json_filename = f"{base_filename}_{timestamp}.json"
+            json_path = os.path.join("upload_logs", json_filename)
+
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(file_info, f, ensure_ascii=False, indent=4)
+
+            # === Get last auc_id ===
             try:
                 all_aucs = databaseClient.getAllPaginated(AUC, 0, 10000)
                 last_auc_id = max([auc.get('auc_id', 0) for auc in all_aucs], default=0)
@@ -680,7 +703,6 @@ class UploadNewSubscriber(Resource):
                 imsi = row["imsi"].zfill(15)
                 msisdn = row["msisdn"].replace('+', '')
 
-                # === AUC data ===
                 auc_data = {
                     "imsi": imsi,
                     "ki": row["ki"],
@@ -690,19 +712,14 @@ class UploadNewSubscriber(Resource):
                 }
 
                 try:
-                    # 1. Create AUC and get the actual inserted object
                     auc_result = databaseClient.CreateObj(AUC, auc_data, False)
 
-                    # Adjust this based on what CreateObj returns
-                    # Does it return inserted object, ID, or nothing?
                     if isinstance(auc_result, dict) and 'auc_id' in auc_result:
                         inserted_auc_id = auc_result["auc_id"]
                     else:
-                        # fallback: fetch latest from DB if you must (less reliable in concurrency)
                         all_aucs = databaseClient.getAllPaginated(AUC, 0, 10000)
                         inserted_auc_id = max([auc.get('auc_id', 0) for auc in all_aucs], default=0)
 
-                    # === SUBSCRIBER data ===
                     subscriber_data = {
                         "imsi": imsi,
                         "enabled": row["enabled"],
@@ -714,7 +731,6 @@ class UploadNewSubscriber(Resource):
                         "ue_ambr_ul": int(row["ue_ambr_ul"])
                     }
 
-                    # === IMS_SUBSCRIBER data ===
                     ims_data = {
                         "imsi": imsi,
                         "msisdn": msisdn,
@@ -726,9 +742,8 @@ class UploadNewSubscriber(Resource):
                         "scscf_realm": "ims.mnc001.mcc001.3gppnetwork.org"
                     }
 
-                    # 2. Insert subscriber and IMS
-                    subscriber_result = databaseClient.CreateObj(SUBSCRIBER, subscriber_data, False)
-                    ims_result = databaseClient.CreateObj(IMS_SUBSCRIBER, ims_data, False)
+                    databaseClient.CreateObj(SUBSCRIBER, subscriber_data, False)
+                    databaseClient.CreateObj(IMS_SUBSCRIBER, ims_data, False)
 
                     created.append({
                         "imsi": imsi,
@@ -744,7 +759,12 @@ class UploadNewSubscriber(Resource):
                         "status": f"failed: {str(e)}"
                     })
 
-            return {"status": "completed", "details": created}, 200
+            return {
+                "status": "completed",
+                "details": created,
+                "file_info": file_info,
+                "json_saved_as": json_filename
+            }, 200
 
         except Exception as E:
             print(E)
