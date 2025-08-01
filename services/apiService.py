@@ -20,6 +20,7 @@ import io
 import csv
 import pandas as pd
 from datetime import datetime
+from flask import send_from_directory
 
 with open("../config.yaml", 'r') as stream:
     config = (yaml.safe_load(stream))
@@ -769,6 +770,129 @@ class UploadNewSubscriber(Resource):
         except Exception as E:
             print(E)
             return handle_exception(E)
+
+@ns_auc.route('/logs/read')
+class ListUploadedFiles(Resource):
+    def get(self):
+        """List all uploaded log files with modified date"""
+        try:
+            files_info = []
+            for filename in os.listdir(UPLOAD_DIR):
+                file_path = os.path.join(UPLOAD_DIR, filename)
+                if os.path.isfile(file_path):
+                    mod_time = os.path.getmtime(file_path)
+                    readable_time = datetime.fromtimestamp(mod_time).strftime('%Y-%m-%d %H:%M:%S')
+                    files_info.append({
+                        "filename": filename,
+                        "modified": readable_time
+                    })
+
+            return {"files": sorted(files_info, key=lambda x: x['modified'], reverse=True)}
+        except FileNotFoundError:
+            return {"error": "Upload directory not found"}, 404
+        except Exception as e:
+            return {"error": str(e)}, 500
+
+@ns_auc.route('/logs/reupload/<filename>')
+class ReuploadFromJson(Resource):
+    def post(self, filename):
+        """Reprocess a previously uploaded file by filename"""
+        try:
+            json_path = os.path.join(UPLOAD_DIR, filename)
+
+            if not os.path.isfile(json_path):
+                return {"error": "Specified file not found"}, 404
+
+            with open(json_path, 'r', encoding='utf-8') as f:
+                file_info = json.load(f)
+
+            file_content_string = file_info.get("file_content", "")
+            if not file_content_string:
+                return {"error": "No file content in the JSON"}, 400
+
+            df = pd.read_csv(io.StringIO(file_content_string), dtype={"imsi": str, "msisdn": str})
+            df = df.applymap(lambda x: str(x).strip() if isinstance(x, str) else x)
+            df['enabled'] = df['enabled'].apply(lambda x: str(x).lower() in ['true', '1', 'yes'])
+
+            # === Re-run the DB logic ===
+            try:
+                all_aucs = databaseClient.getAllPaginated(AUC, 0, 10000)
+                last_auc_id = max([auc.get('auc_id', 0) for auc in all_aucs], default=0)
+            except Exception as e:
+                print("Error getting last auc_id:", e)
+                last_auc_id = 0
+
+            created = []
+
+            for _, row in df.iterrows():
+                imsi = row["imsi"].zfill(15)
+                msisdn = row["msisdn"].replace('+', '')
+
+                auc_data = {
+                    "imsi": imsi,
+                    "ki": row["ki"],
+                    "opc": row["opc"],
+                    "amf": row["amf"],
+                    "sqn": int(row["sqn"])
+                }
+
+                try:
+                    auc_result = databaseClient.CreateObj(AUC, auc_data, False)
+
+                    if isinstance(auc_result, dict) and 'auc_id' in auc_result:
+                        inserted_auc_id = auc_result["auc_id"]
+                    else:
+                        all_aucs = databaseClient.getAllPaginated(AUC, 0, 10000)
+                        inserted_auc_id = max([auc.get('auc_id', 0) for auc in all_aucs], default=0)
+
+                    subscriber_data = {
+                        "imsi": imsi,
+                        "enabled": row["enabled"],
+                        "auc_id": inserted_auc_id,
+                        "default_apn": int(row["default_apn"]),
+                        "apn_list": row["apn_list"],
+                        "msisdn": msisdn,
+                        "ue_ambr_dl": int(row["ue_ambr_dl"]),
+                        "ue_ambr_ul": int(row["ue_ambr_ul"])
+                    }
+
+                    ims_data = {
+                        "imsi": imsi,
+                        "msisdn": msisdn,
+                        "sh_profile": "string",
+                        "scscf_peer": "scscf.ims.mnc001.mcc001.3gppnetwork.org",
+                        "msisdn_list": f"[{msisdn}]",
+                        "ifc_path": "default_ifc.xml",
+                        "scscf": "sip:scscf.ims.mnc001.mcc001.3gppnetwork.org:6060",
+                        "scscf_realm": "ims.mnc001.mcc001.3gppnetwork.org"
+                    }
+
+                    databaseClient.CreateObj(SUBSCRIBER, subscriber_data, False)
+                    databaseClient.CreateObj(IMS_SUBSCRIBER, ims_data, False)
+
+                    created.append({
+                        "imsi": imsi,
+                        "auc_id": inserted_auc_id,
+                        "status": "success"
+                    })
+
+                except Exception as e:
+                    print(f"Error reprocessing IMSI {imsi}:", e)
+                    created.append({
+                        "imsi": imsi,
+                        "auc_id": inserted_auc_id if 'inserted_auc_id' in locals() else None,
+                        "status": f"failed: {str(e)}"
+                    })
+
+            return {
+                "status": "reupload completed",
+                "source_file": filename,
+                "details": created
+            }, 200
+
+        except Exception as e:
+            print("Unexpected error:", e)
+            return {"error": str(e)}, 500
 
 @ns_auc.route('/subscriber/delete')
 class DeleteSubscribers(Resource):
