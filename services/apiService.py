@@ -28,6 +28,9 @@ with open("../config.yaml", 'r') as stream:
 BASE_URL = "http://localhost:8080"  
 HEADERS = {"Content-Type": "application/json"}
 
+UPLOAD_DIR = "/home/lekha/docker_open5gs/pyhss/uploaded_files"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
 siteName = config.get("hss", {}).get("site_name", "")
 originHostname = socket.gethostname()
 lockProvisioning = config.get('hss', {}).get('lock_provisioning', False)
@@ -685,7 +688,7 @@ class UploadNewSubscriber(Resource):
             base_filename = os.path.splitext(file_name)[0]
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             json_filename = f"{base_filename}_{timestamp}.json"
-            json_path = os.path.join("upload_logs", json_filename)
+            json_path = os.path.join("UPLOAD_DIR", json_filename)
 
             with open(json_path, 'w', encoding='utf-8') as f:
                 json.dump(file_info, f, ensure_ascii=False, indent=4)
