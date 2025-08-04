@@ -652,9 +652,9 @@ class UploadAUC(Resource):
 
 @ns_auc.route('/newsubscriber/upload')
 class UploadNewSubscriber(Resource):
-    @ns_auc.doc('Upload Excel to create new subscribers (AUC, SUBSCRIBER, IMS)')
+    @ns_auc.doc('Upload Excel or CSV to create new subscribers (AUC, SUBSCRIBER, IMS)')
     def put(self):
-        '''Upload Excel file to create AUC, SUBSCRIBER, and IMS_SUBSCRIBER entries'''
+        '''Upload Excel or CSV to create AUC, SUBSCRIBER, and IMS_SUBSCRIBER entries'''
         try:
             if 'file' not in request.files:
                 return {'error': 'No file part in the request'}, 400
@@ -663,8 +663,18 @@ class UploadNewSubscriber(Resource):
             if file.filename == '':
                 return {'error': 'No selected file'}, 400
 
+            filename = file.filename.lower()
             stream = io.BytesIO(file.read())
-            df = pd.read_excel(stream, dtype={"imsi": str, "msisdn": str})
+
+            # Detect and parse file type
+            if filename.endswith(".csv"):
+                df = pd.read_csv(stream, dtype={"imsi": str, "msisdn": str})
+            elif filename.endswith(".xlsx"):
+                df = pd.read_excel(stream, dtype={"imsi": str, "msisdn": str})
+            else:
+                return {"error": "Unsupported file type. Only .csv and .xlsx are supported."}, 400
+
+            # Clean and normalize data
             df = df.applymap(lambda x: str(x).strip() if isinstance(x, str) else x)
             df['enabled'] = df['enabled'].apply(lambda x: str(x).lower() in ['true', '1', 'yes'])
 
@@ -692,15 +702,11 @@ class UploadNewSubscriber(Resource):
                 }
 
                 try:
-                    # 1. Create AUC and get the actual inserted object
                     auc_result = databaseClient.CreateObj(AUC, auc_data, False)
 
-                    # Adjust this based on what CreateObj returns
-                    # Does it return inserted object, ID, or nothing?
                     if isinstance(auc_result, dict) and 'auc_id' in auc_result:
                         inserted_auc_id = auc_result["auc_id"]
                     else:
-                        # fallback: fetch latest from DB if you must (less reliable in concurrency)
                         all_aucs = databaseClient.getAllPaginated(AUC, 0, 10000)
                         inserted_auc_id = max([auc.get('auc_id', 0) for auc in all_aucs], default=0)
 
@@ -728,9 +734,8 @@ class UploadNewSubscriber(Resource):
                         "scscf_realm": "ims.mnc001.mcc001.3gppnetwork.org"
                     }
 
-                    # 2. Insert subscriber and IMS
-                    subscriber_result = databaseClient.CreateObj(SUBSCRIBER, subscriber_data, False)
-                    ims_result = databaseClient.CreateObj(IMS_SUBSCRIBER, ims_data, False)
+                    databaseClient.CreateObj(SUBSCRIBER, subscriber_data, False)
+                    databaseClient.CreateObj(IMS_SUBSCRIBER, ims_data, False)
 
                     created.append({
                         "imsi": imsi,
