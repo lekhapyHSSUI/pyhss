@@ -28,9 +28,6 @@ with open("../config.yaml", 'r') as stream:
 BASE_URL = "http://localhost:8080"  
 HEADERS = {"Content-Type": "application/json"}
 
-UPLOAD_DIR = "/home/lekha/docker_open5gs/pyhss/uploaded_files"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
 siteName = config.get("hss", {}).get("site_name", "")
 originHostname = socket.gethostname()
 lockProvisioning = config.get('hss', {}).get('lock_provisioning', False)
@@ -666,34 +663,12 @@ class UploadNewSubscriber(Resource):
             if file.filename == '':
                 return {'error': 'No selected file'}, 400
 
-            # === Read file and convert to DataFrame ===
             stream = io.BytesIO(file.read())
             df = pd.read_excel(stream, dtype={"imsi": str, "msisdn": str})
             df = df.applymap(lambda x: str(x).strip() if isinstance(x, str) else x)
             df['enabled'] = df['enabled'].apply(lambda x: str(x).lower() in ['true', '1', 'yes'])
 
-            # === Capture file metadata ===
-            file_name = file.filename
-            upload_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            file_content_string = df.to_csv(index=False)
-
-            file_info = {
-                "file_name": file_name,
-                "upload_time": upload_time,
-                "file_content": file_content_string
-            }
-
-            # === Save file_info to a .json file with timestamp ===
-            os.makedirs("upload_logs", exist_ok=True)
-            base_filename = os.path.splitext(file_name)[0]
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            json_filename = f"{base_filename}_{timestamp}.json"
-            json_path = os.path.join(UPLOAD_DIR, json_filename)
-
-            with open(json_path, 'w', encoding='utf-8') as f:
-                json.dump(file_info, f, ensure_ascii=False, indent=4)
-
-            # === Get last auc_id ===
+            # Get last auc_id
             try:
                 all_aucs = databaseClient.getAllPaginated(AUC, 0, 10000)
                 last_auc_id = max([auc.get('auc_id', 0) for auc in all_aucs], default=0)
@@ -707,6 +682,7 @@ class UploadNewSubscriber(Resource):
                 imsi = row["imsi"].zfill(15)
                 msisdn = row["msisdn"].replace('+', '')
 
+                # === AUC data ===
                 auc_data = {
                     "imsi": imsi,
                     "ki": row["ki"],
@@ -716,14 +692,19 @@ class UploadNewSubscriber(Resource):
                 }
 
                 try:
+                    # 1. Create AUC and get the actual inserted object
                     auc_result = databaseClient.CreateObj(AUC, auc_data, False)
 
+                    # Adjust this based on what CreateObj returns
+                    # Does it return inserted object, ID, or nothing?
                     if isinstance(auc_result, dict) and 'auc_id' in auc_result:
                         inserted_auc_id = auc_result["auc_id"]
                     else:
+                        # fallback: fetch latest from DB if you must (less reliable in concurrency)
                         all_aucs = databaseClient.getAllPaginated(AUC, 0, 10000)
                         inserted_auc_id = max([auc.get('auc_id', 0) for auc in all_aucs], default=0)
 
+                    # === SUBSCRIBER data ===
                     subscriber_data = {
                         "imsi": imsi,
                         "enabled": row["enabled"],
@@ -735,6 +716,7 @@ class UploadNewSubscriber(Resource):
                         "ue_ambr_ul": int(row["ue_ambr_ul"])
                     }
 
+                    # === IMS_SUBSCRIBER data ===
                     ims_data = {
                         "imsi": imsi,
                         "msisdn": msisdn,
@@ -746,8 +728,9 @@ class UploadNewSubscriber(Resource):
                         "scscf_realm": "ims.mnc001.mcc001.3gppnetwork.org"
                     }
 
-                    databaseClient.CreateObj(SUBSCRIBER, subscriber_data, False)
-                    databaseClient.CreateObj(IMS_SUBSCRIBER, ims_data, False)
+                    # 2. Insert subscriber and IMS
+                    subscriber_result = databaseClient.CreateObj(SUBSCRIBER, subscriber_data, False)
+                    ims_result = databaseClient.CreateObj(IMS_SUBSCRIBER, ims_data, False)
 
                     created.append({
                         "imsi": imsi,
@@ -763,139 +746,11 @@ class UploadNewSubscriber(Resource):
                         "status": f"failed: {str(e)}"
                     })
 
-            return {
-                "status": "completed",
-                "details": created,
-                "file_info": file_info,
-                "json_saved_as": json_filename
-            }, 200
+            return {"status": "completed", "details": created}, 200
 
         except Exception as E:
             print(E)
             return handle_exception(E)
-
-@ns_auc.route('/logs/read')
-class ListUploadedFiles(Resource):
-    def get(self):
-        """List all uploaded log files with modified date"""
-        try:
-            files_info = []
-            for filename in os.listdir(UPLOAD_DIR):
-                file_path = os.path.join(UPLOAD_DIR, filename)
-                if os.path.isfile(file_path):
-                    mod_time = os.path.getmtime(file_path)
-                    readable_time = datetime.fromtimestamp(mod_time).strftime('%Y-%m-%d %H:%M:%S')
-                    files_info.append({
-                        "filename": filename,
-                        "modified": readable_time
-                    })
-
-            return {"files": sorted(files_info, key=lambda x: x['modified'], reverse=True)}
-        except FileNotFoundError:
-            return {"error": "Upload directory not found"}, 404
-        except Exception as e:
-            return {"error": str(e)}, 500
-
-@ns_auc.route('/logs/reupload/<filename>')
-class ReuploadFromJson(Resource):
-    def post(self, filename):
-        """Reprocess a previously uploaded file by filename"""
-        try:
-            json_path = os.path.join(UPLOAD_DIR, filename)
-
-            if not os.path.isfile(json_path):
-                return {"error": "Specified file not found"}, 404
-
-            with open(json_path, 'r', encoding='utf-8') as f:
-                file_info = json.load(f)
-
-            file_content_string = file_info.get("file_content", "")
-            if not file_content_string:
-                return {"error": "No file content in the JSON"}, 400
-
-            df = pd.read_csv(io.StringIO(file_content_string), dtype={"imsi": str, "msisdn": str})
-            df = df.applymap(lambda x: str(x).strip() if isinstance(x, str) else x)
-            df['enabled'] = df['enabled'].apply(lambda x: str(x).lower() in ['true', '1', 'yes'])
-
-            # === Re-run the DB logic ===
-            try:
-                all_aucs = databaseClient.getAllPaginated(AUC, 0, 10000)
-                last_auc_id = max([auc.get('auc_id', 0) for auc in all_aucs], default=0)
-            except Exception as e:
-                print("Error getting last auc_id:", e)
-                last_auc_id = 0
-
-            created = []
-
-            for _, row in df.iterrows():
-                imsi = row["imsi"].zfill(15)
-                msisdn = row["msisdn"].replace('+', '')
-
-                auc_data = {
-                    "imsi": imsi,
-                    "ki": row["ki"],
-                    "opc": row["opc"],
-                    "amf": row["amf"],
-                    "sqn": int(row["sqn"])
-                }
-
-                try:
-                    auc_result = databaseClient.CreateObj(AUC, auc_data, False)
-
-                    if isinstance(auc_result, dict) and 'auc_id' in auc_result:
-                        inserted_auc_id = auc_result["auc_id"]
-                    else:
-                        all_aucs = databaseClient.getAllPaginated(AUC, 0, 10000)
-                        inserted_auc_id = max([auc.get('auc_id', 0) for auc in all_aucs], default=0)
-
-                    subscriber_data = {
-                        "imsi": imsi,
-                        "enabled": row["enabled"],
-                        "auc_id": inserted_auc_id,
-                        "default_apn": int(row["default_apn"]),
-                        "apn_list": row["apn_list"],
-                        "msisdn": msisdn,
-                        "ue_ambr_dl": int(row["ue_ambr_dl"]),
-                        "ue_ambr_ul": int(row["ue_ambr_ul"])
-                    }
-
-                    ims_data = {
-                        "imsi": imsi,
-                        "msisdn": msisdn,
-                        "sh_profile": "string",
-                        "scscf_peer": "scscf.ims.mnc001.mcc001.3gppnetwork.org",
-                        "msisdn_list": f"[{msisdn}]",
-                        "ifc_path": "default_ifc.xml",
-                        "scscf": "sip:scscf.ims.mnc001.mcc001.3gppnetwork.org:6060",
-                        "scscf_realm": "ims.mnc001.mcc001.3gppnetwork.org"
-                    }
-
-                    databaseClient.CreateObj(SUBSCRIBER, subscriber_data, False)
-                    databaseClient.CreateObj(IMS_SUBSCRIBER, ims_data, False)
-
-                    created.append({
-                        "imsi": imsi,
-                        "auc_id": inserted_auc_id,
-                        "status": "success"
-                    })
-
-                except Exception as e:
-                    print(f"Error reprocessing IMSI {imsi}:", e)
-                    created.append({
-                        "imsi": imsi,
-                        "auc_id": inserted_auc_id if 'inserted_auc_id' in locals() else None,
-                        "status": f"failed: {str(e)}"
-                    })
-
-            return {
-                "status": "reupload completed",
-                "source_file": filename,
-                "details": created
-            }, 200
-
-        except Exception as e:
-            print("Unexpected error:", e)
-            return {"error": str(e)}, 500
 
 @ns_auc.route('/subscriber/delete')
 class DeleteSubscribers(Resource):
