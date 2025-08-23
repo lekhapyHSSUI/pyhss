@@ -27,7 +27,7 @@ with open("../config.yaml", 'r') as stream:
 
 BASE_URL = "http://localhost:8080"  
 HEADERS = {"Content-Type": "application/json"}
-UPLOAD_ENABLED = True
+UPLOAD_ENABLED = TRUE
 
 siteName = config.get("hss", {}).get("site_name", "")
 originHostname = socket.gethostname()
@@ -383,9 +383,9 @@ class PyHSS_APN(Resource):
 if UPLOAD_ENABLED :
     @ns_apn.route('/upload')
     class UploadAPN(Resource):
-        @ns_apn.doc('Upload CSV to create or update multiple APNs')
+        @ns_apn.doc('Upload CSV to create or update multiple APNs (identified by IMSI)')
         def put(self):
-            '''Upload a CSV file and create/update multiple APNs'''
+            '''Upload a CSV file and create/update multiple APNs using IMSI as the key'''
             try:
                 if 'file' not in request.files:
                     return {'error': 'No file part in the request'}, 400
@@ -395,30 +395,40 @@ if UPLOAD_ENABLED :
                 if file.filename == '':
                     return {'error': 'No selected file'}, 400
 
-                stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
+                # Read with utf-8-sig to remove BOM
+                stream = io.StringIO(file.stream.read().decode("utf-8-sig"), newline=None)
                 csv_reader = csv.DictReader(stream)
+
+                # Strip BOM from headers
+                if csv_reader.fieldnames:
+                    csv_reader.fieldnames = [name.lstrip("\ufeff") for name in csv_reader.fieldnames]
 
                 results = []
                 for row in csv_reader:
-                    cleaned_row = {k: self._convert_value(v) for k, v in row.items()}
-                    apn_id = cleaned_row.get("apn_id")
+                    # Clean row keys + values
+                    cleaned_row = {
+                        k.lstrip("\ufeff"): self._convert_value(v)
+                        for k, v in row.items()
+                    }
 
-                    if apn_id is None:
+                    imsi = cleaned_row.get("imsi")
+
+                    if imsi is None:
                         results.append({
-                            "apn_id": None,
+                            "imsi": None,
                             "action": "error",
-                            "error": "Missing apn_id in row"
+                            "error": "Missing imsi in row"
                         })
                         continue
 
                     try:
-                        # Try to get existing APN
-                        existing_apn = databaseClient.GetObj(APN, apn_id)
+                        # Try to get existing APN by IMSI
+                        existing_apn = databaseClient.GetObj(APN, imsi)
 
                         # If exists, update
-                        updated_apn = databaseClient.UpdateObj(APN, cleaned_row, apn_id, False)
+                        updated_apn = databaseClient.UpdateObj(APN, cleaned_row, imsi, False)
                         results.append({
-                            "apn_id": apn_id,
+                            "imsi": imsi,
                             "action": "updated",
                             "data": updated_apn
                         })
@@ -426,20 +436,20 @@ if UPLOAD_ENABLED :
                         # If not found, create new
                         if "No <class 'database.APN'>" in str(e):
                             try:
-                                new_apn_id = databaseClient.CreateObj(APN, cleaned_row, False)
+                                new_imsi = databaseClient.CreateObj(APN, cleaned_row, False)
                                 results.append({
-                                    "apn_id": new_apn_id,
+                                    "imsi": new_imsi,
                                     "action": "created"
                                 })
                             except Exception as inner_e:
                                 results.append({
-                                    "apn_id": apn_id,
+                                    "imsi": imsi,
                                     "action": "error",
                                     "error": str(inner_e)
                                 })
                         else:
                             results.append({
-                                "apn_id": apn_id,
+                                "imsi": imsi,
                                 "action": "error",
                                 "error": str(e)
                             })
@@ -448,13 +458,13 @@ if UPLOAD_ENABLED :
 
             except Exception as e:
                 print("Exception while uploading APNs:", e)
-                return handle_exception(e)
+                return {"error": str(e)}, 500
 
         def _convert_value(self, value):
             """Utility to convert CSV strings to appropriate types."""
             if value is None:
                 return None
-            value = value.strip()
+            value = value.strip().lstrip("\ufeff")  # strip whitespace + BOM if present
             if value.upper() == "TRUE":
                 return True
             if value.upper() == "FALSE":
@@ -464,7 +474,10 @@ if UPLOAD_ENABLED :
             try:
                 return int(value)
             except:
-                return value
+                try:
+                    return float(value)
+                except:
+                    return value
 
 @ns_apn.route('/list')
 class PyHSS_OAM_All_APNs(Resource):
@@ -570,9 +583,9 @@ class PyHSS_AUC(Resource):
 if UPLOAD_ENABLED :
     @ns_auc.route('/upload')
     class UploadAUC(Resource):
-        @ns_auc.doc('Upload CSV to create or update multiple AUCs')
+        @ns_auc.doc('Upload CSV to create or update multiple AUCs (identified by IMSI)')
         def put(self):
-            '''Upload a CSV file and create/update multiple AUCs'''
+            '''Upload a CSV file and create/update multiple AUCs using IMSI as the key'''
             try:
                 if 'file' not in request.files:
                     return {'error': 'No file part in the request'}, 400
@@ -582,30 +595,40 @@ if UPLOAD_ENABLED :
                 if file.filename == '':
                     return {'error': 'No selected file'}, 400
 
-                stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
+                # Read with utf-8-sig to auto-strip BOM
+                stream = io.StringIO(file.stream.read().decode("utf-8-sig"), newline=None)
                 csv_reader = csv.DictReader(stream)
+
+                # Clean BOM from headers if still present
+                if csv_reader.fieldnames:
+                    csv_reader.fieldnames = [name.lstrip("\ufeff") for name in csv_reader.fieldnames]
 
                 results = []
                 for row in csv_reader:
-                    cleaned_row = {k: self._convert_value(v) for k, v in row.items()}
-                    auc_id = cleaned_row.get("auc_id")
+                    # Clean row keys + values
+                    cleaned_row = {
+                        k.lstrip("\ufeff"): self._convert_value(v)
+                        for k, v in row.items()
+                    }
 
-                    if auc_id is None:
+                    imsi = cleaned_row.get("imsi")
+
+                    if imsi is None:
                         results.append({
-                            "auc_id": None,
+                            "imsi": None,
                             "action": "error",
-                            "error": "Missing auc_id in row"
+                            "error": "Missing imsi in row"
                         })
                         continue
 
                     try:
-                        # Try to get existing AUC
-                        existing_auc = databaseClient.GetObj(AUC, auc_id)
+                        # Try to get existing AUC by IMSI
+                        existing_auc = databaseClient.GetObj(AUC, imsi)
 
                         # If exists, update
-                        updated_auc = databaseClient.UpdateObj(AUC, cleaned_row, auc_id, False)
+                        updated_auc = databaseClient.UpdateObj(AUC, cleaned_row, imsi, False)
                         results.append({
-                            "auc_id": auc_id,
+                            "imsi": imsi,
                             "action": "updated",
                             "data": updated_auc
                         })
@@ -613,35 +636,35 @@ if UPLOAD_ENABLED :
                         # If not found, create new
                         if "No <class 'database.AUC'>" in str(e):
                             try:
-                                new_auc_id = databaseClient.CreateObj(AUC, cleaned_row, False)
+                                new_imsi = databaseClient.CreateObj(AUC, cleaned_row, False)
                                 results.append({
-                                    "auc_id": new_auc_id,
+                                    "imsi": new_imsi,
                                     "action": "created"
                                 })
                             except Exception as inner_e:
                                 results.append({
-                                    "auc_id": auc_id,
+                                    "imsi": imsi,
                                     "action": "error",
                                     "error": str(inner_e)
                                 })
                         else:
                             results.append({
-                                "auc_id": auc_id,
+                                "imsi": imsi,
                                 "action": "error",
                                 "error": str(e)
                             })
 
                 return {"status": "success", "results": results}, 200
 
-            except Exception as E:
-                print(E)
-                return handle_exception(E)
+            except Exception as e:
+                print("Exception while uploading AUCs:", e)
+                return {"error": str(e)}, 500
 
         def _convert_value(self, value):
             """Utility to convert CSV strings to appropriate types."""
             if value is None:
                 return None
-            value = value.strip()
+            value = value.strip().lstrip("\ufeff")  # strip whitespace + BOM if present
             if value.upper() == "TRUE":
                 return True
             if value.upper() == "FALSE":
@@ -651,7 +674,10 @@ if UPLOAD_ENABLED :
             try:
                 return int(value)
             except:
-                return value
+                try:
+                    return float(value)
+                except:
+                    return value
 
 if UPLOAD_ENABLED :
     @ns_auc.route('/newsubscriber/upload')
@@ -966,9 +992,9 @@ class PyHSS_SUBSCRIBER(Resource):
 if UPLOAD_ENABLED :
     @ns_subscriber.route('/upload')
     class UploadSUBSCRIBER(Resource):
-        @ns_subscriber.doc('Upload CSV to create/update multiple SUBSCRIBERs')
+        @ns_subscriber.doc('Upload CSV to create/update multiple SUBSCRIBERs (identified by IMSI)')
         def put(self):
-            '''Upload a CSV file and create/update multiple SUBSCRIBERs'''
+            '''Upload a CSV file and create/update multiple SUBSCRIBERs using IMSI as the key'''
             try:
                 if 'file' not in request.files:
                     return {'error': 'No file part in the request'}, 400
@@ -978,70 +1004,80 @@ if UPLOAD_ENABLED :
                 if file.filename == '':
                     return {'error': 'No selected file'}, 400
 
-                stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
+                # Read with utf-8-sig to handle BOM
+                stream = io.StringIO(file.stream.read().decode("utf-8-sig"), newline=None)
                 csv_reader = csv.DictReader(stream)
+
+                # Clean BOM from headers
+                if csv_reader.fieldnames:
+                    csv_reader.fieldnames = [name.lstrip("\ufeff") for name in csv_reader.fieldnames]
 
                 results = []
                 for row in csv_reader:
-                    cleaned_row = {k: self._convert_value(v) for k, v in row.items()}
+                    # Clean row keys + values
+                    cleaned_row = {
+                        k.lstrip("\ufeff"): self._convert_value(v)
+                        for k, v in row.items()
+                    }
 
-                    # Clean msisdn
+                    # Normalize msisdn
                     if 'msisdn' in cleaned_row and cleaned_row['msisdn']:
                         cleaned_row['msisdn'] = cleaned_row['msisdn'].replace('+', '')
 
-                    subscriber_id = cleaned_row.get("subscriber_id")
+                    # Use IMSI as primary key
+                    imsi = cleaned_row.get("imsi")
 
-                    if subscriber_id is None:
+                    if imsi is None:
                         results.append({
-                            "subscriber_id": None,
+                            "imsi": None,
                             "action": "error",
-                            "error": "Missing subscriber_id"
+                            "error": "Missing imsi in row"
                         })
                         continue
 
                     try:
-                        # Try to get existing SUBSCRIBER
-                        existing = databaseClient.GetObj(SUBSCRIBER, subscriber_id)
+                        # Try to get existing SUBSCRIBER by IMSI
+                        existing = databaseClient.GetObj(SUBSCRIBER, imsi)
 
                         # Update if found
-                        updated_subscriber = databaseClient.UpdateObj(SUBSCRIBER, cleaned_row, subscriber_id, False)
+                        updated_subscriber = databaseClient.UpdateObj(SUBSCRIBER, cleaned_row, imsi, False)
                         results.append({
-                            "subscriber_id": subscriber_id,
+                            "imsi": imsi,
                             "action": "updated",
                             "data": updated_subscriber
                         })
                     except Exception as e:
                         if "No <class 'database.SUBSCRIBER'>" in str(e):
                             try:
-                                new_id = databaseClient.CreateObj(SUBSCRIBER, cleaned_row, False)
+                                new_imsi = databaseClient.CreateObj(SUBSCRIBER, cleaned_row, False)
                                 results.append({
-                                    "subscriber_id": new_id,
+                                    "imsi": new_imsi,
                                     "action": "created"
                                 })
                             except Exception as inner_e:
                                 results.append({
-                                    "subscriber_id": subscriber_id,
+                                    "imsi": imsi,
                                     "action": "error",
                                     "error": str(inner_e)
                                 })
                         else:
                             results.append({
-                                "subscriber_id": subscriber_id,
+                                "imsi": imsi,
                                 "action": "error",
                                 "error": str(e)
                             })
 
                 return {"status": "success", "results": results}, 200
 
-            except Exception as E:
-                print(E)
-                return handle_exception(E)
+            except Exception as e:
+                print("Exception while uploading SUBSCRIBERs:", e)
+                return {"error": str(e)}, 500
 
         def _convert_value(self, value):
             """Utility to convert CSV strings to appropriate types."""
             if value is None:
                 return None
-            value = value.strip()
+            value = value.strip().lstrip("\ufeff")  # strip whitespace + BOM if present
             if value.upper() == "TRUE":
                 return True
             if value.upper() == "FALSE":
@@ -1051,7 +1087,10 @@ if UPLOAD_ENABLED :
             try:
                 return int(value)
             except:
-                return value
+                try:
+                    return float(value)
+                except:
+                    return value
 
 @ns_subscriber.route('/imsi/<string:imsi>')
 class PyHSS_SUBSCRIBER_IMSI(Resource):
@@ -1218,9 +1257,9 @@ class PyHSS_IMS_SUBSCRIBER(Resource):
 if UPLOAD_ENABLED :
     @ns_ims_subscriber.route('/upload')
     class UploadIMS_SUBSCRIBER(Resource):
-        @ns_ims_subscriber.doc('Upload CSV to create/update multiple IMS SUBSCRIBERs')
+        @ns_ims_subscriber.doc('Upload CSV to create/update multiple IMS SUBSCRIBERs (identified by IMSI)')
         def put(self):
-            '''Upload a CSV file and create/update multiple IMS SUBSCRIBERs'''
+            '''Upload a CSV file and create/update multiple IMS SUBSCRIBERs using IMSI as the key'''
             try:
                 if 'file' not in request.files:
                     return {'error': 'No file part in the request'}, 400
@@ -1230,37 +1269,47 @@ if UPLOAD_ENABLED :
                 if file.filename == '':
                     return {'error': 'No selected file'}, 400
 
-                stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
+                # Read with utf-8-sig to handle BOM
+                stream = io.StringIO(file.stream.read().decode("utf-8-sig"), newline=None)
                 csv_reader = csv.DictReader(stream)
+
+                # Clean BOM from headers
+                if csv_reader.fieldnames:
+                    csv_reader.fieldnames = [name.lstrip("\ufeff") for name in csv_reader.fieldnames]
 
                 results = []
                 for row in csv_reader:
-                    cleaned_row = {k: self._convert_value(v) for k, v in row.items()}
+                    # Clean row keys + values
+                    cleaned_row = {
+                        k.lstrip("\ufeff"): self._convert_value(v)
+                        for k, v in row.items()
+                    }
 
-                    # Clean msisdn fields if present
+                    # Normalize msisdn fields
                     if 'msisdn' in cleaned_row and cleaned_row['msisdn']:
                         cleaned_row['msisdn'] = cleaned_row['msisdn'].replace('+', '')
                     if 'msisdn_list' in cleaned_row and cleaned_row['msisdn_list']:
                         cleaned_row['msisdn_list'] = cleaned_row['msisdn_list'].replace('+', '')
 
-                    ims_subscriber_id = cleaned_row.get("ims_subscriber_id")
+                    # Use IMSI as primary key
+                    imsi = cleaned_row.get("imsi")
 
-                    if ims_subscriber_id is None:
+                    if imsi is None:
                         results.append({
-                            "ims_subscriber_id": None,
+                            "imsi": None,
                             "action": "error",
-                            "error": "Missing ims_subscriber_id"
+                            "error": "Missing imsi in row"
                         })
                         continue
 
                     try:
-                        # Try to get existing object
-                        existing = databaseClient.GetObj(IMS_SUBSCRIBER, ims_subscriber_id)
+                        # Try to get existing IMS_SUBSCRIBER by IMSI
+                        existing = databaseClient.GetObj(IMS_SUBSCRIBER, imsi)
 
-                        # Update if exists
-                        updated_obj = databaseClient.UpdateObj(IMS_SUBSCRIBER, cleaned_row, ims_subscriber_id, False)
+                        # Update if found
+                        updated_obj = databaseClient.UpdateObj(IMS_SUBSCRIBER, cleaned_row, imsi, False)
                         results.append({
-                            "ims_subscriber_id": ims_subscriber_id,
+                            "imsi": imsi,
                             "action": "updated",
                             "data": updated_obj
                         })
@@ -1268,35 +1317,35 @@ if UPLOAD_ENABLED :
                     except Exception as e:
                         if "No <class 'database.IMS_SUBSCRIBER'>" in str(e):
                             try:
-                                new_id = databaseClient.CreateObj(IMS_SUBSCRIBER, cleaned_row, False)
+                                new_imsi = databaseClient.CreateObj(IMS_SUBSCRIBER, cleaned_row, False)
                                 results.append({
-                                    "ims_subscriber_id": new_id,
+                                    "imsi": new_imsi,
                                     "action": "created"
                                 })
                             except Exception as inner_e:
                                 results.append({
-                                    "ims_subscriber_id": ims_subscriber_id,
+                                    "imsi": imsi,
                                     "action": "error",
                                     "error": str(inner_e)
                                 })
                         else:
                             results.append({
-                                "ims_subscriber_id": ims_subscriber_id,
+                                "imsi": imsi,
                                 "action": "error",
                                 "error": str(e)
                             })
 
                 return {"status": "success", "results": results}, 200
 
-            except Exception as E:
-                print(E)
-                return handle_exception(E)
+            except Exception as e:
+                print("Exception while uploading IMS SUBSCRIBERs:", e)
+                return {"error": str(e)}, 500
 
         def _convert_value(self, value):
             """Utility to convert CSV strings to appropriate types."""
             if value is None:
                 return None
-            value = value.strip()
+            value = value.strip().lstrip("\ufeff")  # strip whitespace + BOM if present
             if value.upper() == "TRUE":
                 return True
             if value.upper() == "FALSE":
@@ -1306,7 +1355,10 @@ if UPLOAD_ENABLED :
             try:
                 return int(value)
             except:
-                return value
+                try:
+                    return float(value)
+                except:
+                    return value
 
 @ns_ims_subscriber.route('/ims_subscriber_msisdn/<string:msisdn>')
 class PyHSS_IMS_SUBSCRIBER_MSISDN(Resource):
