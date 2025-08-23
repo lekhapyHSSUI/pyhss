@@ -1026,14 +1026,17 @@ if UPLOAD_ENABLED :
                         for k, v in row.items()
                     }
 
-                    # Normalize msisdn
+                    # Normalize msisdn (remove leading +)
                     if 'msisdn' in cleaned_row and cleaned_row['msisdn']:
-                        cleaned_row['msisdn'] = cleaned_row['msisdn'].replace('+', '')
+                        cleaned_row['msisdn'] = str(cleaned_row['msisdn']).replace('+', '')
 
-                    # Use IMSI as primary key
+                    # Normalize IMSI (primary key, always 15 digits string)
                     imsi = cleaned_row.get("imsi")
+                    if imsi:
+                        imsi = str(imsi).zfill(15)
+                        cleaned_row["imsi"] = imsi
 
-                    if imsi is None:
+                    if not imsi:
                         results.append({
                             "imsi": None,
                             "action": "error",
@@ -1083,19 +1086,24 @@ if UPLOAD_ENABLED :
             """Utility to convert CSV strings to appropriate types."""
             if value is None:
                 return None
-            value = value.strip().lstrip("\ufeff")  # strip whitespace + BOM if present
+
+            # Always cast to string before string operations
+            value = str(value).strip().lstrip("\ufeff")
+
             if value.upper() == "TRUE":
                 return True
             if value.upper() == "FALSE":
                 return False
             if value == "":
                 return None
+
+            # Try numeric conversion
             try:
                 return int(value)
-            except:
+            except ValueError:
                 try:
                     return float(value)
-                except:
+                except ValueError:
                     return value
 
 @ns_subscriber.route('/imsi/<string:imsi>')
@@ -1351,19 +1359,24 @@ if UPLOAD_ENABLED :
             """Utility to convert CSV strings to appropriate types."""
             if value is None:
                 return None
-            value = value.strip().lstrip("\ufeff")  # strip whitespace + BOM if present
+
+            # Always convert to string before using strip/replace
+            value = str(value).strip().lstrip("\ufeff")
+
             if value.upper() == "TRUE":
                 return True
             if value.upper() == "FALSE":
                 return False
             if value == "":
                 return None
+
+            # Try numeric conversion
             try:
                 return int(value)
-            except:
+            except ValueError:
                 try:
                     return float(value)
-                except:
+                except ValueError:
                     return value
 
 @ns_ims_subscriber.route('/ims_subscriber_msisdn/<string:msisdn>')
