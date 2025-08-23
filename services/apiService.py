@@ -27,7 +27,7 @@ with open("../config.yaml", 'r') as stream:
 
 BASE_URL = "http://localhost:8080"  
 HEADERS = {"Content-Type": "application/json"}
-UPLOAD_ENABLED = TRUE
+UPLOAD_ENABLED = True
 
 siteName = config.get("hss", {}).get("site_name", "")
 originHostname = socket.gethostname()
@@ -771,6 +771,9 @@ if UPLOAD_ENABLED :
                         created.append({
                             "imsi": imsi,
                             "auc_id": inserted_auc_id,
+                            "auc_data": auc_data,
+                            "subscriber_data": subscriber_data,
+                            "ims_data": ims_data,
                             "status": "success"
                         })
 
@@ -778,7 +781,9 @@ if UPLOAD_ENABLED :
                         print(f"Error processing IMSI {imsi}:", e)
                         created.append({
                             "imsi": imsi,
-                            "auc_id": inserted_auc_id if 'inserted_auc_id' in locals() else None,
+                            "auc_data": auc_data,
+                            "subscriber_data": subscriber_data if 'subscriber_data' in locals() else None,
+                            "ims_data": ims_data if 'ims_data' in locals() else None,
                             "status": f"failed: {str(e)}"
                         })
 
