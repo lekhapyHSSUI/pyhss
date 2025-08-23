@@ -719,8 +719,9 @@ if UPLOAD_ENABLED :
                 created = []
 
                 for _, row in df.iterrows():
-                    imsi = row["imsi"].zfill(15)
-                    msisdn = row["msisdn"].replace('+', '')
+                    # FIX: always cast to string before zfill/replace
+                    imsi = str(row["imsi"]).split('.')[0].zfill(15) if pd.notna(row["imsi"]) else None
+                    msisdn = str(row["msisdn"]).replace('+', '') if pd.notna(row["msisdn"]) else None
 
                     # === AUC data ===
                     auc_data = {
