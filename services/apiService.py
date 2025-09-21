@@ -818,9 +818,13 @@ if UPLOAD_ENABLED :
                     try:
                         r1 = requests.get(f"{BASE_URL}/ims_subscriber/ims_subscriber_imsi/{imsi}", headers=HEADERS)
                         if r1.status_code == 200:
-                            ims_id = r1.json().get("ims_subscriber_id")
-                            d1 = requests.delete(f"{BASE_URL}/ims_subscriber/{ims_id}", headers=HEADERS)
-                            log["deleted"].append(f"IMS_SUBSCRIBER {ims_id}")
+                            data = r1.json() if r1.content else {}
+                            ims_id = data.get("ims_subscriber_id")
+                            if ims_id:
+                                d1 = requests.delete(f"{BASE_URL}/ims_subscriber/{ims_id}", headers=HEADERS)
+                                log["deleted"].append(f"IMS_SUBSCRIBER {ims_id}")
+                            else:
+                                log["errors"].append("IMS_SUBSCRIBER fetch succeeded but ID missing")
                         elif r1.status_code == 404:
                             log["errors"].append("IMS_SUBSCRIBER not found")
                         else:
@@ -832,9 +836,13 @@ if UPLOAD_ENABLED :
                     try:
                         r2 = requests.get(f"{BASE_URL}/subscriber/imsi/{imsi}", headers=HEADERS)
                         if r2.status_code == 200:
-                            sub_id = r2.json().get("subscriber_id")
-                            d2 = requests.delete(f"{BASE_URL}/subscriber/{sub_id}", headers=HEADERS)
-                            log["deleted"].append(f"SUBSCRIBER {sub_id}")
+                            data = r2.json() if r2.content else {}
+                            sub_id = data.get("subscriber_id")
+                            if sub_id:
+                                d2 = requests.delete(f"{BASE_URL}/subscriber/{sub_id}", headers=HEADERS)
+                                log["deleted"].append(f"SUBSCRIBER {sub_id}")
+                            else:
+                                log["errors"].append("SUBSCRIBER fetch succeeded but ID missing")
                         elif r2.status_code == 404:
                             log["errors"].append("SUBSCRIBER not found")
                         else:
@@ -846,9 +854,13 @@ if UPLOAD_ENABLED :
                     try:
                         r3 = requests.get(f"{BASE_URL}/auc/imsi/{imsi}", headers=HEADERS)
                         if r3.status_code == 200:
-                            auc_id = r3.json().get("auc_id")
-                            d3 = requests.delete(f"{BASE_URL}/auc/{auc_id}", headers=HEADERS)
-                            log["deleted"].append(f"AUC {auc_id}")
+                            data = r3.json() if r3.content else {}
+                            auc_id = data.get("auc_id")
+                            if auc_id:
+                                d3 = requests.delete(f"{BASE_URL}/auc/{auc_id}", headers=HEADERS)
+                                log["deleted"].append(f"AUC {auc_id}")
+                            else:
+                                log["errors"].append("AUC fetch succeeded but ID missing")
                         elif r3.status_code == 404:
                             log["errors"].append("AUC not found")
                         else:
@@ -862,6 +874,7 @@ if UPLOAD_ENABLED :
 
             except Exception as e:
                 return {"error": str(e)}, 500
+
 
 @ns_auc.route('/list')
 class PyHSS_AUC_All(Resource):
