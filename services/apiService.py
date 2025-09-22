@@ -793,7 +793,7 @@ if UPLOAD_ENABLED :
                 print(E)
                 return handle_exception(E)
 
-if UPLOAD_ENABLED :
+if UPLOAD_ENABLED:
     @ns_auc.route('/subscriber/delete')
     class DeleteSubscribers(Resource):
         @ns_auc.doc('Delete subscribers, IMS subscribers, and AUC records from Excel IMSI list')
@@ -807,7 +807,10 @@ if UPLOAD_ENABLED :
 
             try:
                 df = pd.read_excel(file, dtype={"imsi": str})
-                df['imsi'] = df['imsi'].apply(lambda x: x.strip().zfill(15))
+                if "imsi" not in df.columns:
+                    return {"error": "Excel must contain an 'imsi' column"}, 400
+
+                df['imsi'] = df['imsi'].apply(lambda x: str(x).strip().zfill(15))
 
                 response_log = []
 
@@ -817,12 +820,15 @@ if UPLOAD_ENABLED :
                     # --- Step 1: IMS_SUBSCRIBER ---
                     try:
                         r1 = requests.get(f"{BASE_URL}/ims_subscriber/ims_subscriber_imsi/{imsi}", headers=HEADERS)
-                        if r1.status_code == 200:
-                            data = r1.json() if r1.content else {}
+                        if r1.status_code == 200 and r1.content:
+                            data = r1.json() or {}
                             ims_id = data.get("ims_subscriber_id")
                             if ims_id:
                                 d1 = requests.delete(f"{BASE_URL}/ims_subscriber/{ims_id}", headers=HEADERS)
-                                log["deleted"].append(f"IMS_SUBSCRIBER {ims_id}")
+                                if d1.status_code == 200:
+                                    log["deleted"].append(f"IMS_SUBSCRIBER {ims_id}")
+                                else:
+                                    log["errors"].append(f"IMS_SUBSCRIBER delete failed: {d1.status_code}")
                             else:
                                 log["errors"].append("IMS_SUBSCRIBER fetch succeeded but ID missing")
                         elif r1.status_code == 404:
@@ -830,17 +836,20 @@ if UPLOAD_ENABLED :
                         else:
                             log["errors"].append(f"IMS_SUBSCRIBER fetch failed: {r1.status_code}")
                     except Exception as e:
-                        log["errors"].append(f"IMS_SUBSCRIBER delete error: {str(e)}")
+                        log["errors"].append(f"IMS_SUBSCRIBER request error: {str(e)}")
 
                     # --- Step 2: SUBSCRIBER ---
                     try:
                         r2 = requests.get(f"{BASE_URL}/subscriber/imsi/{imsi}", headers=HEADERS)
-                        if r2.status_code == 200:
-                            data = r2.json() if r2.content else {}
+                        if r2.status_code == 200 and r2.content:
+                            data = r2.json() or {}
                             sub_id = data.get("subscriber_id")
                             if sub_id:
                                 d2 = requests.delete(f"{BASE_URL}/subscriber/{sub_id}", headers=HEADERS)
-                                log["deleted"].append(f"SUBSCRIBER {sub_id}")
+                                if d2.status_code == 200:
+                                    log["deleted"].append(f"SUBSCRIBER {sub_id}")
+                                else:
+                                    log["errors"].append(f"SUBSCRIBER delete failed: {d2.status_code}")
                             else:
                                 log["errors"].append("SUBSCRIBER fetch succeeded but ID missing")
                         elif r2.status_code == 404:
@@ -848,17 +857,20 @@ if UPLOAD_ENABLED :
                         else:
                             log["errors"].append(f"SUBSCRIBER fetch failed: {r2.status_code}")
                     except Exception as e:
-                        log["errors"].append(f"SUBSCRIBER delete error: {str(e)}")
+                        log["errors"].append(f"SUBSCRIBER request error: {str(e)}")
 
                     # --- Step 3: AUC ---
                     try:
                         r3 = requests.get(f"{BASE_URL}/auc/imsi/{imsi}", headers=HEADERS)
-                        if r3.status_code == 200:
-                            data = r3.json() if r3.content else {}
+                        if r3.status_code == 200 and r3.content:
+                            data = r3.json() or {}
                             auc_id = data.get("auc_id")
                             if auc_id:
                                 d3 = requests.delete(f"{BASE_URL}/auc/{auc_id}", headers=HEADERS)
-                                log["deleted"].append(f"AUC {auc_id}")
+                                if d3.status_code == 200:
+                                    log["deleted"].append(f"AUC {auc_id}")
+                                else:
+                                    log["errors"].append(f"AUC delete failed: {d3.status_code}")
                             else:
                                 log["errors"].append("AUC fetch succeeded but ID missing")
                         elif r3.status_code == 404:
@@ -866,7 +878,7 @@ if UPLOAD_ENABLED :
                         else:
                             log["errors"].append(f"AUC fetch failed: {r3.status_code}")
                     except Exception as e:
-                        log["errors"].append(f"AUC delete error: {str(e)}")
+                        log["errors"].append(f"AUC request error: {str(e)}")
 
                     response_log.append(log)
 
