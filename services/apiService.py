@@ -806,6 +806,7 @@ if UPLOAD_ENABLED:
                 return {'error': 'No file selected'}, 400
 
             try:
+                # Read Excel file and normalize IMSIs
                 df = pd.read_excel(file, dtype={"imsi": str})
                 if "imsi" not in df.columns:
                     return {"error": "Excel must contain an 'imsi' column"}, 400
@@ -828,15 +829,15 @@ if UPLOAD_ENABLED:
                                 if d1.status_code == 200:
                                     log["deleted"].append(f"IMS_SUBSCRIBER {ims_id}")
                                 else:
-                                    log["errors"].append(f"IMS_SUBSCRIBER delete failed: {d1.status_code}")
+                                    log["errors"].append(f"IMS_SUBSCRIBER delete failed ({d1.status_code})")
                             else:
-                                log["errors"].append("IMS_SUBSCRIBER fetch succeeded but ID missing")
+                                log["errors"].append("IMS_SUBSCRIBER found but ID missing")
                         elif r1.status_code == 404:
                             log["errors"].append("IMS_SUBSCRIBER not found")
                         else:
-                            log["errors"].append(f"IMS_SUBSCRIBER fetch failed: {r1.status_code}")
+                            log["errors"].append(f"IMS_SUBSCRIBER fetch failed ({r1.status_code})")
                     except Exception as e:
-                        log["errors"].append(f"IMS_SUBSCRIBER request error: {str(e)}")
+                        log["errors"].append(f"IMS_SUBSCRIBER error: {str(e)}")
 
                     # --- Step 2: SUBSCRIBER ---
                     try:
@@ -849,15 +850,15 @@ if UPLOAD_ENABLED:
                                 if d2.status_code == 200:
                                     log["deleted"].append(f"SUBSCRIBER {sub_id}")
                                 else:
-                                    log["errors"].append(f"SUBSCRIBER delete failed: {d2.status_code}")
+                                    log["errors"].append(f"SUBSCRIBER delete failed ({d2.status_code})")
                             else:
-                                log["errors"].append("SUBSCRIBER fetch succeeded but ID missing")
+                                log["errors"].append("SUBSCRIBER found but ID missing")
                         elif r2.status_code == 404:
                             log["errors"].append("SUBSCRIBER not found")
                         else:
-                            log["errors"].append(f"SUBSCRIBER fetch failed: {r2.status_code}")
+                            log["errors"].append(f"SUBSCRIBER fetch failed ({r2.status_code})")
                     except Exception as e:
-                        log["errors"].append(f"SUBSCRIBER request error: {str(e)}")
+                        log["errors"].append(f"SUBSCRIBER error: {str(e)}")
 
                     # --- Step 3: AUC ---
                     try:
@@ -870,23 +871,22 @@ if UPLOAD_ENABLED:
                                 if d3.status_code == 200:
                                     log["deleted"].append(f"AUC {auc_id}")
                                 else:
-                                    log["errors"].append(f"AUC delete failed: {d3.status_code}")
+                                    log["errors"].append(f"AUC delete failed ({d3.status_code})")
                             else:
-                                log["errors"].append("AUC fetch succeeded but ID missing")
+                                log["errors"].append("AUC found but ID missing")
                         elif r3.status_code == 404:
                             log["errors"].append("AUC not found")
                         else:
-                            log["errors"].append(f"AUC fetch failed: {r3.status_code}")
+                            log["errors"].append(f"AUC fetch failed ({r3.status_code})")
                     except Exception as e:
-                        log["errors"].append(f"AUC request error: {str(e)}")
+                        log["errors"].append(f"AUC error: {str(e)}")
 
                     response_log.append(log)
 
                 return {"result": "completed", "details": response_log}, 200
 
             except Exception as e:
-                return {"error": str(e)}, 500
-
+                return {"error": f"Processing failed: {str(e)}"}, 500
 
 @ns_auc.route('/list')
 class PyHSS_AUC_All(Resource):
